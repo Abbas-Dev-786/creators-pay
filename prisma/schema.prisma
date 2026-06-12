@@ -1,0 +1,194 @@
+// CreatorPay data model. See PRD section 8.
+// Amounts are stored as base-unit strings (e.g. USDC 6dp: "5000000" = 5 USDC)
+// to avoid float drift; convert with viem parseUnits/formatUnits at the edges.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  buyer
+  creator
+  both
+}
+
+enum ProductType {
+  digital_download
+  ai_service
+  subscription
+}
+
+enum OrderStatus {
+  pending
+  succeeded
+  failed
+}
+
+enum SubscriptionStatus {
+  active
+  cancelled
+  expired
+  past_due
+}
+
+enum PaymentEventType {
+  one_time
+  recurring
+  ai_micro
+}
+
+enum PaymentEventStatus {
+  pending
+  succeeded
+  failed
+}
+
+model User {
+  id            String   @id @default(cuid())
+  walletAddress String   @unique
+  role          UserRole @default(buyer)
+  displayName   String?
+  slug          String?  @unique
+  payoutAddress String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  products      Product[]      @relation("CreatorProducts")
+  orders        Order[]
+  subscriptions Subscription[]
+  aiInvocations AIInvocation[]
+}
+
+model Product {
+  id               String      @id @default(cuid())
+  creatorId        String
+  creator          User        @relation("CreatorProducts", fields: [creatorId], references: [id], onDelete: Cascade)
+  type             ProductType
+  title            String
+  slug             String
+  description      String?
+  // Price in token base units (string). For subscriptions, see SubscriptionPlan.
+  priceAmount      String
+  priceTokenSymbol String      @default("USDC")
+  // file references, AI config (model, systemPrompt), etc.
+  metadata         Json?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  plan          SubscriptionPlan?
+  orders        Order[]
+  assets        Asset[]
+  aiInvocations AIInvocation[]
+
+  @@unique([creatorId, slug])
+  @@index([type])
+}
+
+model SubscriptionPlan {
+  id                    String   @id @default(cuid())
+  productId             String   @unique
+  product               Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  periodAmount          String // base units per period
+  periodTokenSymbol     String   @default("USDC")
+  periodDurationSeconds Int
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  buyerId     String
+  buyer       User        @relation(fields: [buyerId], references: [id])
+  productId   String
+  product     Product     @relation(fields: [productId], references: [id])
+  amount      String
+  tokenSymbol String      @default("USDC")
+  txHash      String?
+  status      OrderStatus @default(pending)
+  createdAt   DateTime    @default(now())
+
+  paymentEvents PaymentEvent[]
+
+  @@index([buyerId])
+  @@index([productId])
+}
+
+model Subscription {
+  id                    String             @id @default(cuid())
+  buyerId               String
+  buyer                 User               @relation(fields: [buyerId], references: [id])
+  planId                String
+  plan                  SubscriptionPlan   @relation(fields: [planId], references: [id])
+  // ERC-7715 permission.context (hex) returned by requestExecutionPermissions.
+  // Sensitive but non-secret; never a private key.
+  permissionContext     String
+  // delegationManager + from, needed to rebuild the x402 delegation provider.
+  delegationManager     String?
+  grantedFrom           String?
+  sessionAccountAddress String
+  status                SubscriptionStatus @default(active)
+  nextBillingAt         DateTime
+  expiry                DateTime
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  paymentEvents PaymentEvent[]
+
+  @@index([status, nextBillingAt])
+}
+
+model PaymentEvent {
+  id                String             @id @default(cuid())
+  type              PaymentEventType
+  orderId           String?
+  order             Order?             @relation(fields: [orderId], references: [id])
+  subscriptionId    String?
+  subscription      Subscription?      @relation(fields: [subscriptionId], references: [id])
+  amount            String
+  tokenSymbol       String             @default("USDC")
+  x402ResourceUrl   String?
+  facilitatorTxHash String?
+  relayerTaskId     String?
+  // Idempotency for recurring billing (F6): a given subscription period charges once.
+  periodIndex       Int?
+  status            PaymentEventStatus @default(pending)
+  createdAt         DateTime           @default(now())
+
+  aiInvocation AIInvocation?
+
+  @@unique([subscriptionId, periodIndex])
+  @@index([relayerTaskId])
+}
+
+model Asset {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // Storage object path within the private bucket (NOT a public URL).
+  storageUrl  String
+  contentType String?
+  createdAt   DateTime @default(now())
+}
+
+model AIInvocation {
+  id             String       @id @default(cuid())
+  productId      String
+  product        Product      @relation(fields: [productId], references: [id])
+  buyerId        String
+  buyer          User         @relation(fields: [buyerId], references: [id])
+  paymentEventId String?      @unique
+  paymentEvent   PaymentEvent? @relation(fields: [paymentEventId], references: [id])
+  prompt         String
+  outputMetadata Json?
+  createdAt      DateTime     @default(now())
+
+  @@index([buyerId])
+}

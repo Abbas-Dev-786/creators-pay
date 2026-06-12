@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "public-relayer": {
+      "source": "1Shot-API/skills",
+      "sourceType": "github",
+      "skillPath": "public-relayer/SKILL.md",
+      "computedHash": "7f2ed4b3cf0313fea0eb9fd76e3c2a20114c9c81dd253da7a7f7703144f9ff3a"
+    },
+    "smart-accounts-kit": {
+      "source": "MetaMask/skills",
+      "sourceType": "github",
+      "skillPath": "domains/web3-tools/skills/smart-accounts-kit/SKILL.md",
+      "computedHash": "8dbe51322a5adec51e6938bd654313d6d7f8b9cfc795b1512271ace41f235293"
+    },
+    "supabase": {
+      "source": "supabase/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/supabase/SKILL.md",
+      "computedHash": "61638e85394d2e39d1109cbf607593afb9733e0de19cdf0b52ec9bc32d95ea74"
+    },
+    "supabase-postgres-best-practices": {
+      "source": "supabase/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/supabase-postgres-best-practices/SKILL.md",
+      "computedHash": "3639bed1f40b3fbadae79fee631c42c89b2d1f5c30b05d5aa3cca06422a6bbbc"
+    },
+    "x402-payments": {
+      "source": "MetaMask/skills",
+      "sourceType": "github",
+      "skillPath": "domains/web3-tools/skills/x402-payments/SKILL.md",
+      "computedHash": "b5b6cfbb88c16b2b8d54fbfd9caa71154d0fe944d2384b4ffb36db5c8770b430"
+    }
+  }
+}
