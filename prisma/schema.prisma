@@ -62,6 +62,7 @@ model User {
   products      Product[]      @relation("CreatorProducts")
   orders        Order[]
   subscriptions Subscription[]
+  aiSessions    AiSession[]
   aiInvocations AIInvocation[]
 }
 
@@ -84,6 +85,7 @@ model Product {
   plan          SubscriptionPlan?
   orders        Order[]
   assets        Asset[]
+  aiSessions    AiSession[]
   aiInvocations AIInvocation[]
 
   @@unique([creatorId, slug])
@@ -143,6 +145,22 @@ model Subscription {
   paymentEvents PaymentEvent[]
 
   @@index([status, nextBillingAt])
+}
+
+model AiSession {
+  id                    String   @id @default(cuid())
+  buyerId               String
+  buyer                 User     @relation(fields: [buyerId], references: [id])
+  productId             String
+  product               Product  @relation(fields: [productId], references: [id])
+  permissionContext     String
+  sessionAccountAddress String
+  budgetAmount          String   // base units of token
+  spentAmount           String   @default("0")
+  tokenSymbol           String   @default("USDC")
+  status                SubscriptionStatus @default(active)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
 
 model PaymentEvent {
