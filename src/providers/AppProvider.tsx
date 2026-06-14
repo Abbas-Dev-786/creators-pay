@@ -2,13 +2,11 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createConfig, http, WagmiProvider } from "wagmi";
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
 import { metaMask } from "wagmi/connectors";
 import { APP_CHAIN } from "@/lib/config";
 
 export const connectors = [metaMask()];
-
-const queryClient = new QueryClient();
 
 export const wagmiConfig = createConfig({
   chains: [APP_CHAIN],
@@ -20,11 +18,13 @@ export const wagmiConfig = createConfig({
 });
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const [queryClient] = useState(() => new QueryClient());
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <WagmiProvider config={wagmiConfig}>
+    <WagmiProvider config={wagmiConfig}>
+      <QueryClientProvider client={queryClient}>
         {children}
-      </WagmiProvider>
-    </QueryClientProvider>
+      </QueryClientProvider>
+    </WagmiProvider>
   );
 }

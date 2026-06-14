@@ -3,6 +3,8 @@ import { Geist, Geist_Mono, Inter } from "next/font/google";
 import "./globals.css";
 import { AppProvider } from "@/providers/AppProvider";
 import { cn } from "@/lib/utils";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/AppSidebar";
 
 const inter = Inter({subsets:['latin'],variable:'--font-sans'});
 
@@ -30,9 +32,21 @@ export default function RootLayout({
   return (
     <html lang="en" className={cn("dark:text-white", "font-sans", inter.variable)}>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} bg-white dark:bg-black text-black dark:text-white font-geist-sans antialiased max-w-full overflow-x-hidden`}
+        className={`${geistSans.variable} ${geistMono.variable} bg-background text-foreground font-geist-sans antialiased max-w-full overflow-x-hidden`}
       >
-        <AppProvider>{children}</AppProvider>
+        <AppProvider>
+          <SidebarProvider>
+            <AppSidebar />
+            <div className="flex-1 w-full relative">
+              <div className="md:hidden absolute top-4 left-4 z-50">
+                <SidebarTrigger />
+              </div>
+              <main className="w-full min-h-screen">
+                {children}
+              </main>
+            </div>
+          </SidebarProvider>
+        </AppProvider>
       </body>
     </html>
   );
