@@ -15,14 +15,17 @@ export default async function ProductPage({
   params: Promise<{ creatorSlug: string; productSlug: string }>;
 }) {
   const { creatorSlug, productSlug } = await params;
+  
+  const decodedCreatorSlug = decodeURIComponent(creatorSlug);
+  const decodedProductSlug = decodeURIComponent(productSlug);
 
   const product = await prisma.product.findUnique({
     where: {
       creatorId_slug: {
         creatorId: (
-          await prisma.user.findUnique({ where: { slug: creatorSlug } })
+          await prisma.user.findUnique({ where: { slug: decodedCreatorSlug } })
         )?.id || "",
-        slug: productSlug,
+        slug: decodedProductSlug,
       },
     },
     include: {
