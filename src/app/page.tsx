@@ -57,9 +57,12 @@ export default async function Home() {
             Sell digital &amp; AI products. Paid via MetaMask smart accounts (x402).
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
+          <Link href="/orders" className="text-sm underline underline-offset-4">
+            My Purchases
+          </Link>
           <Link href="/dashboard" className="text-sm underline underline-offset-4">
-            Creator dashboard
+            Creator Dashboard
           </Link>
           <ConnectBar />
         </div>

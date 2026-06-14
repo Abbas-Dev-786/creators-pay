@@ -19,12 +19,12 @@
   "dependencies": {
     "@metamask/sdk": "~0.33.1",
     "@metamask/smart-accounts-kit": "^1.6.0",
-    "@metamask/x402": "^1.0.0",
+    "@metamask/x402": "^0.2.0",
     "@prisma/client": "^6.2.1",
     "@supabase/supabase-js": "^2.47.10",
     "@tanstack/react-query": "^5.90.21",
-    "@x402/core": "^1.0.0",
-    "@x402/fetch": "^1.0.0",
+    "@x402/core": "^2.15.0",
+    "@x402/fetch": "^2.15.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.18.0",
@@ -40,7 +40,6 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
-    "@noble/ed25519": "^2.2.3",
     "@tailwindcss/postcss": "^4.1.7",
     "@types/node": "^20",
     "@types/react": "^19",

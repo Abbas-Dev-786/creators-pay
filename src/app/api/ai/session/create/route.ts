@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db/client";
 
 export async function POST(req: NextRequest) {
   try {
-    const { productId, buyerAddress, permissionContext, budgetAmount } = await req.json();
+    const { productId, buyerAddress, permissionContext, budgetAmount, grantedFrom } = await req.json();
 
     if (!productId || !buyerAddress || !permissionContext || !budgetAmount) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -33,7 +33,8 @@ export async function POST(req: NextRequest) {
         buyerId: buyer.id,
         productId: product.id,
         permissionContext,
-        sessionAccountAddress: buyerAddress.toLowerCase(),
+        grantedFrom,
+        sessionAccountAddress: process.env.NEXT_PUBLIC_SESSION_ACCOUNT || buyerAddress.toLowerCase(),
         budgetAmount: budgetAmount,
         status: "active",
       },

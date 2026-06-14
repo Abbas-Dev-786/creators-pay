@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useAccount, useWalletClient } from "wagmi";
 import { createWalletClient, custom } from "viem";
-import { APP_CHAIN, RELAYER_URL, USDC_ADDRESS, USDC_DECIMALS } from "@/lib/config";
+import { APP_CHAIN, USDC_ADDRESS } from "@/lib/config";
 import { erc7715ProviderActions } from "@metamask/smart-accounts-kit/actions";
 import Button from "@/components/Button";
 
@@ -34,43 +34,23 @@ export function SubscriptionCheckoutButton({
     setLoading(true);
 
     try {
-      // 1. Get Relayer Capabilities to find the target address
-      const rpcReq = await fetch(RELAYER_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "relayer_getCapabilities",
-          params: [String(APP_CHAIN.id)]
-        })
-      });
-      const rpcRes = await rpcReq.json();
-      if (rpcRes.error) throw new Error(rpcRes.error.message);
-      
-      const caps = rpcRes.result[String(APP_CHAIN.id)];
-      const targetAddress = caps.targetAddress;
-
-      // 2. Request ERC-7715 Permissions from the wallet
       const wallet7715 = createWalletClient({
         chain: APP_CHAIN,
         transport: custom(window.ethereum as any)
       }).extend(erc7715ProviderActions());
 
-      // Let's add a small buffer for relayer fees (e.g. 0.05 USDC per period)
-      // In production, we'd estimate this accurately using relayer_getFeeData
       const estimatedFee = 50000n; // 0.05 USDC in 6 decimals
       const workAmount = BigInt(periodAmount);
       const totalAmount = workAmount + estimatedFee;
 
       const granted = await wallet7715.requestExecutionPermissions([{
         chainId: APP_CHAIN.id,
-        to: targetAddress,
+        to: process.env.NEXT_PUBLIC_SESSION_ACCOUNT as `0x${string}`,
         permission: {
           type: "erc20-token-periodic",
           data: {
             tokenAddress: USDC_ADDRESS,
-            periodAmount: totalAmount.toString(),
+            periodAmount: totalAmount,
             periodDuration: periodDurationSeconds,
             justification: "Subscription payment + gas fee to CreatorPay",
           },
@@ -90,6 +70,7 @@ export function SubscriptionCheckoutButton({
           productId,
           buyerAddress: address,
           permissionContext: context,
+          grantedFrom: granted[0].from,
         }),
       });
 

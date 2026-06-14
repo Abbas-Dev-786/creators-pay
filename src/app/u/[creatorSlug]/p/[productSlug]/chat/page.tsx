@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { formatAmount } from "@/lib/money";
+import { useAccount, useWalletClient } from "wagmi";
 
 export default function ChatPage() {
   const searchParams = useSearchParams();
@@ -13,6 +14,10 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  const { address, isConnected } = useAccount();
+  const { data: walletClient } = useWalletClient();
+  const [signature, setSignature] = useState<string>("");
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -35,6 +40,8 @@ export default function ChatPage() {
         body: JSON.stringify({
           sessionId,
           messages: newMessages,
+          buyerAddress: address,
+          signature,
         }),
       });
 
@@ -51,6 +58,34 @@ export default function ChatPage() {
 
   if (!sessionId) {
     return <div className="p-10 text-center">Session ID is required</div>;
+  }
+
+  if (!isConnected || !address) {
+    return <div className="p-10 text-center">Please connect your wallet to use the AI Chat.</div>;
+  }
+
+  if (!signature) {
+    return (
+      <div className="p-10 text-center flex flex-col items-center gap-4">
+        <h2 className="text-xl font-bold">Authenticate Session</h2>
+        <p className="opacity-70">Please sign a message to prove ownership of this session.</p>
+        <button
+          className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700"
+          onClick={async () => {
+            if (!walletClient) return;
+            try {
+              const sig = await walletClient.signMessage({ message: `CreatorPay AI session ${sessionId}` });
+              setSignature(sig);
+            } catch (e: any) {
+              setError(e.message);
+            }
+          }}
+        >
+          Sign to Authenticate
+        </button>
+        {error && <p className="text-red-500 mt-2 text-sm">{error}</p>}
+      </div>
+    );
   }
 
   return (

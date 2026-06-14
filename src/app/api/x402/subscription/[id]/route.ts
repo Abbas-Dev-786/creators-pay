@@ -3,7 +3,6 @@ import { prisma } from "@/lib/db/client";
 import { HTTPFacilitatorClient, x402ResourceServer, x402HTTPResourceServer, HTTPAdapter, HTTPRequestContext } from "@x402/core/server";
 import { x402ExactEvmErc7710ServerScheme } from "@metamask/x402";
 import { FACILITATOR_URL, X402_NETWORK } from "@/lib/config";
-import { createSignedDownloadUrl } from "@/lib/storage/supabase";
 import { toX402Price } from "@/lib/money";
 
 const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
@@ -24,28 +23,33 @@ class NextHTTPAdapter implements HTTPAdapter {
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
-    const product = await prisma.product.findUnique({
-      where: { id },
-      include: { creator: true, assets: true },
+    const { id: subscriptionId } = await params;
+    
+    // We are processing a subscription charge. The ID is the subscription ID.
+    const subscription = await prisma.subscription.findUnique({
+      where: { id: subscriptionId },
+      include: { 
+        plan: { include: { product: { include: { creator: true } } } }
+      },
     });
 
-    if (!product) {
-      return NextResponse.json({ error: "Product not found" }, { status: 404 });
+    if (!subscription || !subscription.plan || !subscription.plan.product) {
+      return NextResponse.json({ error: "Subscription not found" }, { status: 404 });
     }
 
-    const payTo = product.creator.payoutAddress || product.creator.walletAddress;
+    const payTo = subscription.plan.product.creator.payoutAddress || subscription.plan.product.creator.walletAddress;
+
 
     const httpServer = new x402HTTPResourceServer(resourceServer, {
-      [`GET /api/x402/product/${id}`]: {
+      [`GET /api/x402/subscription/${subscriptionId}`]: {
         accepts: [{
           scheme: "exact",
           network: X402_NETWORK,
-          price: toX402Price(product.priceAmount),
+          price: toX402Price(subscription.plan.periodAmount),
           payTo: payTo,
           extra: { assetTransferMethod: "erc7710" },
         }],
-        description: "Paid digital download",
+        description: "Recurring subscription charge",
         mimeType: "application/json",
       }
     });
@@ -56,7 +60,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       path: adapter.getPath(),
       method: adapter.getMethod(),
       paymentHeader: adapter.getHeader('payment-signature'),
-      routePattern: `GET /api/x402/product/${id}`
+      routePattern: `GET /api/x402/subscription/${subscriptionId}`
     };
 
     const processResult = await httpServer.processHTTPRequest(context);
@@ -67,7 +71,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     if (processResult.type === "no-payment-required") {
-       // Should not happen as we configured the route to require payment
        return NextResponse.json({ error: "Configuration error" }, { status: 500 });
     }
 
@@ -80,59 +83,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
        return NextResponse.json(body || { error: "Settlement failed" }, { status, headers });
     }
 
-    // Payment Successful!
-    // 1. Record the order and payment event in the database
-    // resolve buyer from result.payer (not creatorId)
-    const buyerAddress = (settleResult.payer || "unknown").toLowerCase();
+    // Payment Successful! The cron job will record the PaymentEvent and update the subscription.
+    // We just return success and the txHash.
     
-    // Attempt to find buyer by address, or just fallback (here we'll just link if we can, or store address in txHash for now if not user).
-    // Let's find user or use creatorId as fallback per task.md (actually task says "resolve buyer from result.payer (not creatorId)")
-    let buyer = await prisma.user.findUnique({ where: { walletAddress: buyerAddress } });
-    if (!buyer) {
-      // Create shadow user if they don't exist
-      buyer = await prisma.user.create({
-        data: { walletAddress: buyerAddress, role: "buyer" }
-      });
-    }
-
-    const order = await prisma.order.create({
-      data: {
-        buyerId: buyer.id,
-        productId: product.id,
-        amount: product.priceAmount,
-        tokenSymbol: product.priceTokenSymbol,
-        txHash: settleResult.transaction,
-        status: "succeeded",
-        paymentEvents: {
-          create: {
-            type: "one_time",
-            amount: product.priceAmount,
-            tokenSymbol: product.priceTokenSymbol,
-            facilitatorTxHash: settleResult.transaction,
-            status: "succeeded",
-          }
-        }
-      }
-    });
-
-    // 2. Generate secure download URL if it's a digital download
-    let downloadUrl = null;
-    if (product.type === "digital_download" && product.assets.length > 0) {
-      const asset = product.assets[0];
-      downloadUrl = await createSignedDownloadUrl(asset.storageUrl);
-    }
-
     const headers = new Headers(settleResult.headers as any);
     
     return NextResponse.json({
       success: true,
-      orderId: order.id,
+      subscriptionId: subscription.id,
       transaction: settleResult.transaction,
-      downloadUrl,
-      message: "Payment settled successfully",
+      message: "Subscription payment settled successfully",
     }, { headers });
   } catch (err: any) {
-    console.error("x402 handler error:", err);
+    console.error("x402 subscription handler error:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

@@ -154,6 +154,7 @@ model AiSession {
   productId             String
   product               Product  @relation(fields: [productId], references: [id])
   permissionContext     String
+  grantedFrom           String?
   sessionAccountAddress String
   budgetAmount          String   // base units of token
   spentAmount           String   @default("0")

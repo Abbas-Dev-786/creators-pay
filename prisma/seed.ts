@@ -90,7 +90,55 @@ async function main() {
     },
   });
 
-  console.log("Seed complete: creator @alice with 3 products.");
+  // Creator 2: Bob
+  const bob = await prisma.user.upsert({
+    where: { walletAddress: "0x2222222222222222222222222222222222222222" },
+    update: {},
+    create: {
+      walletAddress: "0x2222222222222222222222222222222222222222",
+      role: "creator",
+      displayName: "Bob Builds",
+      slug: "bob",
+      payoutAddress: "0x2222222222222222222222222222222222222222",
+    },
+  });
+
+  // Creator 3: Charlie
+  const charlie = await prisma.user.upsert({
+    where: { walletAddress: "0x3333333333333333333333333333333333333333" },
+    update: {},
+    create: {
+      walletAddress: "0x3333333333333333333333333333333333333333",
+      role: "creator",
+      displayName: "Charlie Creates",
+      slug: "charlie",
+      payoutAddress: "0x3333333333333333333333333333333333333333",
+    },
+  });
+
+  // 4. Second Digital Download (for Bob)
+  await prisma.product.upsert({
+    where: { creatorId_slug: { creatorId: bob.id, slug: "nextjs-boilerplate" } },
+    update: {},
+    create: {
+      creatorId: bob.id,
+      type: "digital_download",
+      title: "Next.js SaaS Boilerplate",
+      slug: "nextjs-boilerplate",
+      description: "A complete starter kit for your next SaaS.",
+      priceAmount: usdc("10"),
+      priceTokenSymbol: "USDC",
+      metadata: { storagePath: "bob/nextjs-boilerplate.zip" },
+      assets: {
+        create: {
+          storageUrl: "bob/nextjs-boilerplate.zip",
+          contentType: "application/zip",
+        },
+      },
+    },
+  });
+
+  console.log("Seed complete: 3 creators, 2 digital downloads, 1 subscription plan, 1 AI product.");
 }
 
 main()

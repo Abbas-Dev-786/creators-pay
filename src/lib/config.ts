@@ -5,8 +5,7 @@ import type { Chain } from "viem";
  * Single source of truth for CreatorPay's chain + integration endpoints.
  *
  * Settlement model (locked): the MetaMask x402 Facilitator redeems ALL
- * ERC-7710 / ERC-7715 payments. 1Shot is used ONLY for EIP-7702
- * EOA -> smart-account upgrades, never for payment settlement.
+ * ERC-7710 / ERC-7715 payments.
  */
 
 const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "84532");
@@ -32,18 +31,6 @@ const FACILITATOR_URLS: Record<number, string> = {
 export const FACILITATOR_URL =
   process.env.FACILITATOR_URL ?? FACILITATOR_URLS[APP_CHAIN.id];
 
-/** 1Shot public relayer JSON-RPC URL. Dev endpoint for Sepolia-class testnets. */
-const RELAYER_URLS: Record<number, string> = {
-  [baseSepolia.id]: "https://relayer.1shotapi.dev/relayers",
-  [base.id]: "https://relayer.1shotapi.com/relayers",
-};
-
-export const RELAYER_URL =
-  process.env.NEXT_PUBLIC_RELAYER_URL ?? RELAYER_URLS[APP_CHAIN.id];
-
-/** 1Shot JWKS endpoint for verifying signed webhook events (Ed25519). */
-export const RELAYER_JWKS_URL =
-  "https://relayer.1shotapi.com/.well-known/jwks.json";
 
 /**
  * Native USDC on the active chain (6 decimals). Override via env when a chain's
@@ -62,3 +49,5 @@ export const USDC_SYMBOL = "USDC";
 
 export const VENICE_BASE_URL =
   process.env.VENICE_BASE_URL ?? "https://api.venice.ai/api/v1";
+
+export const SESSION_ACCOUNT = (process.env.NEXT_PUBLIC_SESSION_ACCOUNT ?? "") as `0x${string}`;

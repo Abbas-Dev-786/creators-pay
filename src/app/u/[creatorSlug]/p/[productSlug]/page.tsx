@@ -7,10 +7,12 @@ import { AiCheckoutButton } from "./AiCheckoutButton";
 
 export const dynamic = "force-dynamic";
 
+const AI_SESSION_MESSAGE_COUNT = 50n;
+
 export default async function ProductPage({
   params,
 }: {
-  params: { creatorSlug: string; productSlug: string };
+  params: Promise<{ creatorSlug: string; productSlug: string }>;
 }) {
   const { creatorSlug, productSlug } = await params;
 
@@ -54,7 +56,7 @@ export default async function ProductPage({
           {product.type === "ai_service" ? (
             <AiCheckoutButton
               productId={product.id}
-              budgetAmount={product.priceAmount}
+              budgetAmount={(BigInt(product.priceAmount) * AI_SESSION_MESSAGE_COUNT).toString()}
               creatorAddress={product.creator.payoutAddress || product.creator.walletAddress}
             />
           ) : isSubscription ? (

@@ -1,27 +1,13 @@
 import { PrismaClient } from "@prisma/client";
-import { decodeDelegations } from "@metamask/smart-accounts-kit/utils";
-import { encodeFunctionData, erc20Abi } from "viem";
-
-// We use relative paths for the cron script as it runs via tsx
-import { RELAYER_URL, APP_CHAIN, USDC_ADDRESS } from "../src/lib/config";
+import { privateKeyToAccount } from "viem/accounts";
+import { createx402DelegationProvider } from "@metamask/smart-accounts-kit/experimental";
+import { x402Erc7710Client } from "@metamask/x402";
+import { x402Client, x402HTTPClient } from "@x402/core/client";
+import { wrapFetchWithPayment } from "@x402/fetch";
 
 const prisma = new PrismaClient();
-
-const WEBHOOK_URL = process.env.WEBHOOK_URL || "http://localhost:3000/api/webhooks/1shot";
-
-/** Convert delegation bigints / Uint8Arrays into JSON-safe shapes. */
-function toRelayerJson(value: unknown): unknown {
-  if (value === null || value === undefined) return value;
-  if (typeof value === "bigint") return `0x${value.toString(16)}`;
-  if (value instanceof Uint8Array) return Array.from(value).map(v => v.toString(16).padStart(2, '0')).join(''); // fallback bytesToHex
-  if (Array.isArray(value)) return value.map(toRelayerJson);
-  if (typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = toRelayerJson(v);
-    return out;
-  }
-  return value;
-}
+const sessionAccount = privateKeyToAccount((process.env.SESSION_PRIVATE_KEY || "0x0000000000000000000000000000000000000000000000000000000000000001") as `0x${string}`);
+const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export async function processSubscriptions() {
   console.log("Starting Subscription Billing Cron...");
@@ -32,7 +18,7 @@ export async function processSubscriptions() {
       nextBillingAt: { lte: new Date() }
     },
     include: {
-      plan: { include: { product: { include: { creator: true } } } },
+      plan: true
     }
   });
 
@@ -41,205 +27,100 @@ export async function processSubscriptions() {
     return;
   }
 
-  // Get Capabilities
-  const rpcReq = await fetch(RELAYER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0", id: 1, method: "relayer_getCapabilities", params: [String(APP_CHAIN.id)]
-    })
-  });
-  const caps = (await rpcReq.json()).result[String(APP_CHAIN.id)];
-
   for (const sub of dueSubscriptions) {
     try {
       console.log(`Processing Subscription ${sub.id}`);
-      const decodedDelegations = decodeDelegations(sub.permissionContext).map(toRelayerJson);
       
-      const workAmount = BigInt(sub.plan.periodAmount);
-      // We start with a mock fee of 0.01 USDC to get a valid estimation
-      const mockFeeAmount = 10000n; 
-      
-      const creatorAddress = sub.plan.product.creator.payoutAddress || sub.plan.product.creator.walletAddress;
+      const latestPayment = await prisma.paymentEvent.findFirst({
+        where: { subscriptionId: sub.id },
+        orderBy: { periodIndex: 'desc' }
+      });
+      const currentPeriodIndex = (latestPayment?.periodIndex ?? -1) + 1;
 
-      const getBundle = (feeAmount: bigint) => ({
-        chainId: String(APP_CHAIN.id),
-        transactions: [
-          {
-            permissionContext: decodedDelegations,
-            executions: [
-              {
-                target: USDC_ADDRESS,
-                value: "0",
-                data: encodeFunctionData({
-                  abi: erc20Abi,
-                  functionName: "transfer",
-                  args: [caps.feeCollector, feeAmount],
-                })
-              },
-              {
-                target: USDC_ADDRESS,
-                value: "0",
-                data: encodeFunctionData({
-                  abi: erc20Abi,
-                  functionName: "transfer",
-                  args: [creatorAddress as `0x${string}`, workAmount],
-                })
-              }
-            ]
+      const pe = await prisma.paymentEvent.upsert({
+        where: {
+          subscriptionId_periodIndex: {
+            subscriptionId: sub.id,
+            periodIndex: currentPeriodIndex,
           }
-        ]
+        },
+        update: {},
+        create: {
+          subscriptionId: sub.id,
+          periodIndex: currentPeriodIndex,
+          type: "recurring",
+          amount: sub.plan.periodAmount,
+          tokenSymbol: sub.plan.periodTokenSymbol,
+          status: "pending",
+        }
       });
 
-      // 1. Estimate
-      let sendParams = getBundle(mockFeeAmount);
-      const estReq = await fetch(RELAYER_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "relayer_estimate7710Transaction", params: [sendParams] })
-      });
-      let estimate = (await estReq.json()).result;
-
-      if (!estimate.success) {
-        throw new Error("Estimate failed: " + estimate.error);
+      if (pe.status === "succeeded") {
+        console.log(`Period ${currentPeriodIndex} already succeeded for sub ${sub.id}`);
+        continue;
       }
 
-      // 2. Adjust fee if needed
-      const requiredFee = BigInt(estimate.requiredPaymentAmount);
-      if (requiredFee !== mockFeeAmount) {
-        sendParams = getBundle(requiredFee);
-        const estReq2 = await fetch(RELAYER_URL, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "relayer_estimate7710Transaction", params: [sendParams] })
+      const erc7710Client = new x402Erc7710Client({
+        delegationProvider: createx402DelegationProvider({
+          account: sessionAccount,
+          parentPermissionContext: sub.permissionContext as `0x${string}`,
+          from: (sub.grantedFrom || sub.sessionAccountAddress) as `0x${string}`,
+        }),
+      });
+
+      const coreClient = new x402Client().register("eip155:*", erc7710Client);
+      const httpClient = new x402HTTPClient(coreClient);
+      const fetchWithPayment = wrapFetchWithPayment(fetch, httpClient);
+
+      let txHash: string;
+      try {
+        const res = await fetchWithPayment(`${BASE_URL}/api/x402/subscription/${sub.id}`);
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(errorText || "Payment failed");
+        }
+        const data = await res.json();
+        txHash = data.transaction;
+      } catch (err: any) {
+        await prisma.paymentEvent.update({
+          where: { id: pe.id },
+          data: { status: "failed" }
         });
-        estimate = (await estReq2.json()).result;
-        if (!estimate.success) throw new Error("Re-estimate failed: " + estimate.error);
+        throw err;
       }
 
-      // 3. Send
-      const sendReq = await fetch(RELAYER_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0", id: 1, method: "relayer_send7710Transaction", params: [{
-            ...sendParams,
-            context: estimate.context,
-            destinationUrl: WEBHOOK_URL,
-            memo: `sub-${sub.id}`
-          }]
-        })
+      await prisma.$transaction(async (tx) => {
+        // Update the payment event
+        await tx.paymentEvent.update({
+          where: { id: pe.id },
+          data: {
+            facilitatorTxHash: txHash,
+            status: "succeeded",
+          }
+        });
+
+        // Advance nextBillingAt
+        const nextBillingAt = new Date(Date.now() + sub.plan.periodDurationSeconds * 1000);
+        await tx.subscription.update({
+          where: { id: sub.id },
+          data: { nextBillingAt }
+        });
       });
 
-      const sendRes = await sendReq.json();
-      if (sendRes.error) throw new Error("Send failed: " + sendRes.error.message);
-
-      console.log(`Successfully dispatched bill for ${sub.id}, taskId: ${sendRes.result}`);
-
+      console.log(`Successfully billed sub ${sub.id}, tx: ${txHash}`);
     } catch (err: any) {
       console.error(`Failed to process subscription ${sub.id}:`, err);
-    }
-  }
-
-  // Process AI Sessions
-  console.log("Processing AI Sessions...");
-  const activeAiSessions = await prisma.aiSession.findMany({
-    where: { status: "active" },
-    include: { product: { include: { creator: true } } }
-  });
-
-  for (const session of activeAiSessions) {
-    try {
-      const spent = BigInt(session.spentAmount);
-      if (spent === 0n) continue;
-
-      console.log(`Settling AI Session ${session.id} for amount ${spent}`);
-      const decodedDelegations = decodeDelegations(session.permissionContext).map(toRelayerJson);
-      
-      const mockFeeAmount = 10000n;
-      const creatorAddress = session.product.creator.payoutAddress || session.product.creator.walletAddress;
-
-      const getBundle = (feeAmount: bigint) => ({
-        chainId: String(APP_CHAIN.id),
-        transactions: [
-          {
-            permissionContext: decodedDelegations,
-            executions: [
-              {
-                target: USDC_ADDRESS,
-                value: "0",
-                data: encodeFunctionData({
-                  abi: erc20Abi,
-                  functionName: "transfer",
-                  args: [caps.feeCollector, feeAmount],
-                })
-              },
-              {
-                target: USDC_ADDRESS,
-                value: "0",
-                data: encodeFunctionData({
-                  abi: erc20Abi,
-                  functionName: "transfer",
-                  args: [creatorAddress as `0x${string}`, spent],
-                })
-              }
-            ]
-          }
-        ]
+      // set past_due on failure
+      await prisma.subscription.update({
+        where: { id: sub.id },
+        data: { status: "past_due" }
       });
-
-      // 1. Estimate
-      let sendParams = getBundle(mockFeeAmount);
-      const estReq = await fetch(RELAYER_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "relayer_estimate7710Transaction", params: [sendParams] })
-      });
-      let estimate = (await estReq.json()).result;
-
-      if (!estimate.success) throw new Error("Estimate failed: " + estimate.error);
-
-      // 2. Adjust fee if needed
-      const requiredFee = BigInt(estimate.requiredPaymentAmount);
-      if (requiredFee !== mockFeeAmount) {
-        sendParams = getBundle(requiredFee);
-        const estReq2 = await fetch(RELAYER_URL, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "relayer_estimate7710Transaction", params: [sendParams] })
-        });
-        estimate = (await estReq2.json()).result;
-        if (!estimate.success) throw new Error("Re-estimate failed: " + estimate.error);
-      }
-
-      // 3. Send
-      const sendReq = await fetch(RELAYER_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0", id: 1, method: "relayer_send7710Transaction", params: [{
-            ...sendParams,
-            context: estimate.context,
-            destinationUrl: WEBHOOK_URL,
-            memo: `ai-${session.id}`
-          }]
-        })
-      });
-
-      const sendRes = await sendReq.json();
-      if (sendRes.error) throw new Error("Send failed: " + sendRes.error.message);
-
-      console.log(`Successfully dispatched settlement for AI session ${session.id}, taskId: ${sendRes.result}`);
-
-      // Reset spent amount to 0 after settlement
-      await prisma.aiSession.update({
-        where: { id: session.id },
-        data: { spentAmount: "0" }
-      });
-
-    } catch (err: any) {
-      console.error(`Failed to process AI session ${session.id}:`, err);
     }
   }
 
   console.log("Cron run complete.");
 }
 
-// Run immediately if executed directly
 if (require.main === module) {
   processSubscriptions().then(() => process.exit(0));
 }
