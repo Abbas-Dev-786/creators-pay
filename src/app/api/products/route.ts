@@ -26,38 +26,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Creator profile not found" }, { status: 404 });
     }
 
-    let productMetadata = {};
+    const productMetadata = {};
 
-    // Create the product in Prisma
-    const product = await prisma.product.create({
-      data: {
-        creatorId: creator.id,
-        type: type as any,
-        title,
-        slug,
-        description,
-        priceAmount,
-        priceTokenSymbol: "USDC",
-        metadata: productMetadata,
-      },
-    });
-
-    if (type === "subscription" && periodDurationSeconds) {
-      await prisma.subscriptionPlan.create({
-        data: {
-          productId: product.id,
-          periodAmount: priceAmount,
-          periodTokenSymbol: "USDC",
-          periodDurationSeconds: parseInt(periodDurationSeconds),
-        },
-      });
-    }
-
+    // Upload the file FIRST so we never create a digital product without its asset.
+    // Path keys on slug (unique per creator) since the product id doesn't exist yet.
+    let storagePath: string | null = null;
     if (type === "digital_download" && file) {
-      // Upload to Supabase Storage
       const supabase = getServiceSupabase();
-      const storagePath = `${creator.id}/${product.id}/${file.name}`;
-      
+      storagePath = `${creator.id}/${slug}/${file.name}`;
+
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
@@ -70,16 +47,36 @@ export async function POST(req: NextRequest) {
 
       if (uploadError) {
         console.error("Storage upload error:", uploadError);
-        // Continue anyway, but log it. A robust app would rollback the DB here.
-      } else {
-        await prisma.asset.create({
-          data: {
-            productId: product.id,
-            storageUrl: storagePath,
-            contentType: file.type,
-          },
-        });
+        return NextResponse.json({ error: "File upload failed" }, { status: 502 });
       }
+    }
+
+    // Create the product (+ asset if uploaded) only after the upload succeeded.
+    const product = await prisma.product.create({
+      data: {
+        creatorId: creator.id,
+        type: type as any,
+        title,
+        slug,
+        description,
+        priceAmount,
+        priceTokenSymbol: "USDC",
+        metadata: productMetadata,
+        ...(storagePath && file
+          ? { assets: { create: { storageUrl: storagePath, contentType: file.type } } }
+          : {}),
+      },
+    });
+
+    if (type === "subscription" && periodDurationSeconds) {
+      await prisma.subscriptionPlan.create({
+        data: {
+          productId: product.id,
+          periodAmount: priceAmount,
+          periodTokenSymbol: "USDC",
+          periodDurationSeconds: parseInt(periodDurationSeconds),
+        },
+      });
     }
 
     return NextResponse.json({ product });

@@ -7,7 +7,11 @@ import { wrapFetchWithPayment } from "@x402/fetch";
 
 const prisma = new PrismaClient();
 const sessionAccount = privateKeyToAccount((process.env.SESSION_PRIVATE_KEY || "0x0000000000000000000000000000000000000000000000000000000000000001") as `0x${string}`);
-const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+const BASE_URL =
+  process.env.NEXT_PUBLIC_APP_URL ??
+  (process.env.NODE_ENV === "production"
+    ? (() => { throw new Error("NEXT_PUBLIC_APP_URL must be set in production"); })()
+    : "http://localhost:3000");
 
 export async function processSubscriptions() {
   console.log("Starting Subscription Billing Cron...");
@@ -30,24 +34,21 @@ export async function processSubscriptions() {
   for (const sub of dueSubscriptions) {
     try {
       console.log(`Processing Subscription ${sub.id}`);
-      
-      const latestPayment = await prisma.paymentEvent.findFirst({
-        where: { subscriptionId: sub.id },
-        orderBy: { periodIndex: 'desc' }
-      });
-      const currentPeriodIndex = (latestPayment?.periodIndex ?? -1) + 1;
+
+      // Authoritative period to bill — advanced only on confirmed success.
+      const periodIndex = sub.currentPeriodIndex;
 
       const pe = await prisma.paymentEvent.upsert({
         where: {
           subscriptionId_periodIndex: {
             subscriptionId: sub.id,
-            periodIndex: currentPeriodIndex,
+            periodIndex,
           }
         },
         update: {},
         create: {
           subscriptionId: sub.id,
-          periodIndex: currentPeriodIndex,
+          periodIndex,
           type: "recurring",
           amount: sub.plan.periodAmount,
           tokenSymbol: sub.plan.periodTokenSymbol,
@@ -55,8 +56,17 @@ export async function processSubscriptions() {
         }
       });
 
+      // Crash recovery: this period already settled on a prior run but the counter
+      // wasn't advanced. Don't re-charge — just advance and move on.
       if (pe.status === "succeeded") {
-        console.log(`Period ${currentPeriodIndex} already succeeded for sub ${sub.id}`);
+        console.log(`Period ${periodIndex} already succeeded for sub ${sub.id}; advancing counter`);
+        await prisma.subscription.update({
+          where: { id: sub.id },
+          data: {
+            currentPeriodIndex: periodIndex + 1,
+            nextBillingAt: new Date(Date.now() + sub.plan.periodDurationSeconds * 1000),
+          }
+        });
         continue;
       }
 
@@ -82,6 +92,7 @@ export async function processSubscriptions() {
         const data = await res.json();
         txHash = data.transaction;
       } catch (err: any) {
+        // Leave the pending row as failed so the SAME period retries next run.
         await prisma.paymentEvent.update({
           where: { id: pe.id },
           data: { status: "failed" }
@@ -89,28 +100,25 @@ export async function processSubscriptions() {
         throw err;
       }
 
-      await prisma.$transaction(async (tx) => {
-        // Update the payment event
-        await tx.paymentEvent.update({
+      // Mark settled and advance counter + nextBillingAt together, atomically.
+      await prisma.$transaction([
+        prisma.paymentEvent.update({
           where: { id: pe.id },
-          data: {
-            facilitatorTxHash: txHash,
-            status: "succeeded",
-          }
-        });
-
-        // Advance nextBillingAt
-        const nextBillingAt = new Date(Date.now() + sub.plan.periodDurationSeconds * 1000);
-        await tx.subscription.update({
+          data: { facilitatorTxHash: txHash, status: "succeeded" }
+        }),
+        prisma.subscription.update({
           where: { id: sub.id },
-          data: { nextBillingAt }
-        });
-      });
+          data: {
+            currentPeriodIndex: periodIndex + 1,
+            nextBillingAt: new Date(Date.now() + sub.plan.periodDurationSeconds * 1000),
+          }
+        }),
+      ]);
 
       console.log(`Successfully billed sub ${sub.id}, tx: ${txHash}`);
     } catch (err: any) {
       console.error(`Failed to process subscription ${sub.id}:`, err);
-      // set past_due on failure
+      // set past_due on failure (counter NOT advanced → same period retries on reactivation)
       await prisma.subscription.update({
         where: { id: sub.id },
         data: { status: "past_due" }

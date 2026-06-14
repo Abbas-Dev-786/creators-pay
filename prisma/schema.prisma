@@ -132,11 +132,14 @@ model Subscription {
   // ERC-7715 permission.context (hex) returned by requestExecutionPermissions.
   // Sensitive but non-secret; never a private key.
   permissionContext     String
-  // delegationManager + from, needed to rebuild the x402 delegation provider.
-  delegationManager     String?
+  // `from` (the granting smart account), needed to rebuild the x402 delegation provider.
   grantedFrom           String?
   sessionAccountAddress String
   status                SubscriptionStatus @default(active)
+  // Authoritative period to bill next. Advanced (with nextBillingAt) only on a
+  // confirmed-settled charge, so failures retry the same period and crash recovery
+  // doesn't invent a new one. Pairs with @@unique([subscriptionId, periodIndex]).
+  currentPeriodIndex    Int                @default(0)
   nextBillingAt         DateTime
   expiry                DateTime
   createdAt             DateTime           @default(now())
