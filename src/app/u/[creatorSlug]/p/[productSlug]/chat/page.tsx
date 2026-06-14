@@ -3,7 +3,10 @@
 import { useState, useRef, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { formatAmount } from "@/lib/money";
-import { useAccount, useWalletClient } from "wagmi";
+import { useAccount } from "wagmi";
+import { getWalletClient, switchChain } from "wagmi/actions";
+import { APP_CHAIN } from "@/lib/config";
+import { wagmiConfig } from "@/providers/AppProvider";
 
 export default function ChatPage() {
   const searchParams = useSearchParams();
@@ -15,8 +18,7 @@ export default function ChatPage() {
   const [error, setError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  const { address, isConnected } = useAccount();
-  const { data: walletClient } = useWalletClient();
+  const { address, isConnected, chainId } = useAccount();
   const [signature, setSignature] = useState<string>("");
 
   useEffect(() => {
@@ -72,8 +74,12 @@ export default function ChatPage() {
         <button
           className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700"
           onClick={async () => {
-            if (!walletClient) return;
             try {
+              if (chainId !== APP_CHAIN.id) {
+                await switchChain(wagmiConfig, { chainId: APP_CHAIN.id });
+              }
+              const walletClient = await getWalletClient(wagmiConfig, { chainId: APP_CHAIN.id });
+              if (!walletClient) throw new Error("Could not reach your wallet. Make sure MetaMask is unlocked.");
               const sig = await walletClient.signMessage({ message: `CreatorPay AI session ${sessionId}` });
               setSignature(sig);
             } catch (e: any) {

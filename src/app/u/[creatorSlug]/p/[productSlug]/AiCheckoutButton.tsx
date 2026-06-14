@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useWalletClient } from "wagmi";
+import { useAccount } from "wagmi";
+import { switchChain } from "wagmi/actions";
 import { createWalletClient, custom } from "viem";
 import { APP_CHAIN, USDC_ADDRESS } from "@/lib/config";
+import { wagmiConfig } from "@/providers/AppProvider";
 import { erc7715ProviderActions } from "@metamask/smart-accounts-kit/actions";
 import Button from "@/components/Button";
 import { useRouter } from "next/navigation";
@@ -17,23 +19,31 @@ export function AiCheckoutButton({
   budgetAmount: string;
   creatorAddress: string;
 }) {
-  const { address, isConnected } = useAccount();
-  const { data: walletClient } = useWalletClient();
+  const { address, isConnected, chainId, connector } = useAccount();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
+  const wrongNetwork = isConnected && chainId !== APP_CHAIN.id;
+
   async function handleStartSession() {
-    if (!walletClient || !address) return alert("Connect wallet first");
-    if (typeof window === "undefined" || !window.ethereum) {
-      return alert("MetaMask is required to authorize AI Sessions");
-    }
+    if (!isConnected || !address || !connector) return alert("Please connect your wallet first.");
 
     setLoading(true);
 
     try {
+      if (chainId !== APP_CHAIN.id) {
+        await switchChain(wagmiConfig, { chainId: APP_CHAIN.id });
+      }
+
+      // Use the provider of the wallet the user actually connected with (via
+      // EIP-6963) — NOT window.ethereum, which another extension (e.g. Flow)
+      // may have hijacked.
+      const provider = await connector.getProvider();
+      if (!provider) throw new Error("Could not reach your wallet provider.");
+
       const wallet7715 = createWalletClient({
         chain: APP_CHAIN,
-        transport: custom(window.ethereum as any)
+        transport: custom(provider as any)
       }).extend(erc7715ProviderActions());
 
       const estimatedFee = 50000n; // 0.05 USDC buffer
@@ -91,12 +101,18 @@ export function AiCheckoutButton({
   }
 
   return (
-    <Button 
-      onClick={handleStartSession} 
+    <Button
+      onClick={handleStartSession}
       disabled={loading || !isConnected}
       className="w-full sm:w-auto"
     >
-      {loading ? "Authorizing Session..." : "Start AI Chat Session"}
+      {loading
+        ? "Authorizing Session..."
+        : !isConnected
+          ? "Connect wallet to start"
+          : wrongNetwork
+            ? `Switch to ${APP_CHAIN.name} & Start`
+            : "Start AI Chat Session"}
     </Button>
   );
 }

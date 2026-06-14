@@ -1,39 +1,56 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useWalletClient, usePublicClient } from "wagmi";
+import { useAccount } from "wagmi";
+import { getWalletClient, getPublicClient, switchChain } from "wagmi/actions";
 import { createx402DelegationProvider } from "@metamask/smart-accounts-kit/experimental";
 import { x402Erc7710Client } from "@metamask/x402";
 import { x402Client, x402HTTPClient } from "@x402/core/client";
 import { wrapFetchWithPayment } from "@x402/fetch";
 import { Implementation, toMetaMaskSmartAccount } from "@metamask/smart-accounts-kit";
 import { APP_CHAIN } from "@/lib/config";
+import { wagmiConfig } from "@/providers/AppProvider";
 import Button from "@/components/Button";
 
-export function CheckoutButton({ 
-  productId, 
-  priceAmount, 
+export function CheckoutButton({
+  productId,
+  priceAmount,
   type,
-  creatorAddress 
-}: { 
-  productId: string; 
+  creatorAddress
+}: {
+  productId: string;
   priceAmount: string;
   type: string;
   creatorAddress: string;
 }) {
-  const { isConnected } = useAccount();
-  const { data: walletClient } = useWalletClient();
-  const publicClient = usePublicClient();
-  
+  const { isConnected, chainId } = useAccount();
+
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
 
+  const wrongNetwork = isConnected && chainId !== APP_CHAIN.id;
+
   async function handleBuy() {
-    if (!walletClient || !publicClient) return alert("Connect wallet first");
+    if (!isConnected) return alert("Please connect your wallet first.");
     setLoading(true);
     setResult(null);
 
     try {
+      // Make sure the wallet is on the right chain BEFORE we ask for a client.
+      // (A connected wallet on the wrong network is the usual cause of the
+      // misleading "connect wallet" error — useWalletClient returns undefined
+      // for an unconfigured chain even though the account is connected.)
+      if (chainId !== APP_CHAIN.id) {
+        await switchChain(wagmiConfig, { chainId: APP_CHAIN.id });
+      }
+
+      // Fetch fresh clients AFTER the switch so we never read a stale value.
+      const walletClient = await getWalletClient(wagmiConfig, { chainId: APP_CHAIN.id });
+      const publicClient = getPublicClient(wagmiConfig, { chainId: APP_CHAIN.id });
+      if (!walletClient || !publicClient) {
+        throw new Error("Could not reach your wallet. Make sure MetaMask is unlocked.");
+      }
+
       // Initialize smart account
       const smartAccount = await toMetaMaskSmartAccount({
         client: publicClient,
@@ -88,12 +105,18 @@ export function CheckoutButton({
   }
 
   return (
-    <Button 
-      onClick={handleBuy} 
+    <Button
+      onClick={handleBuy}
       disabled={loading || !isConnected}
       className="w-full sm:w-auto"
     >
-      {loading ? "Processing Payment..." : "Buy Now"}
+      {loading
+        ? "Processing Payment..."
+        : !isConnected
+          ? "Connect wallet to buy"
+          : wrongNetwork
+            ? `Switch to ${APP_CHAIN.name} & Buy`
+            : "Buy Now"}
     </Button>
   );
 }

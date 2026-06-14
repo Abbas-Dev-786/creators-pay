@@ -3,15 +3,17 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createConfig, http, WagmiProvider } from "wagmi";
 import { ReactNode, useState } from "react";
-import { metaMask } from "wagmi/connectors";
 import { APP_CHAIN } from "@/lib/config";
 
-export const connectors = [metaMask()];
-
+// EIP-6963 multi-wallet discovery. When several wallet extensions are installed
+// (MetaMask, Flow, Coinbase, ...) they all fight over the legacy
+// `window.ethereum`, so a hardcoded injected target can open the wrong wallet.
+// Discovery announces each wallet separately by name/RDNS, so the UI can offer
+// "Connect with MetaMask" specifically and the 7715 flows can grab MetaMask's
+// own provider via connector.getProvider().
 export const wagmiConfig = createConfig({
   chains: [APP_CHAIN],
-  connectors,
-  multiInjectedProviderDiscovery: false,
+  multiInjectedProviderDiscovery: true,
   transports: {
     [APP_CHAIN.id]: http(),
   },

@@ -1,42 +1,50 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useWalletClient } from "wagmi";
+import { useAccount } from "wagmi";
+import { switchChain } from "wagmi/actions";
 import { createWalletClient, custom } from "viem";
 import { APP_CHAIN, USDC_ADDRESS } from "@/lib/config";
+import { wagmiConfig } from "@/providers/AppProvider";
 import { erc7715ProviderActions } from "@metamask/smart-accounts-kit/actions";
 import Button from "@/components/Button";
 
-export function SubscriptionCheckoutButton({ 
+export function SubscriptionCheckoutButton({
   productId,
   periodAmount,
   periodDurationSeconds,
   creatorAddress
-}: { 
+}: {
   productId: string;
   periodAmount: string;
   periodDurationSeconds: number;
   creatorAddress: string;
 }) {
-  const { address, isConnected } = useAccount();
-  const { data: walletClient } = useWalletClient();
+  const { address, isConnected, chainId, connector } = useAccount();
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
 
+  const wrongNetwork = isConnected && chainId !== APP_CHAIN.id;
+
   async function handleSubscribe() {
-    if (!walletClient || !address) return alert("Connect wallet first");
-    
-    // Check if the wallet has window.ethereum
-    if (typeof window === "undefined" || !window.ethereum) {
-      return alert("MetaMask is required for subscriptions");
-    }
+    if (!isConnected || !address || !connector) return alert("Please connect your wallet first.");
 
     setLoading(true);
 
     try {
+      // Ensure the wallet is on the right network before requesting permissions.
+      if (chainId !== APP_CHAIN.id) {
+        await switchChain(wagmiConfig, { chainId: APP_CHAIN.id });
+      }
+
+      // Use the connected wallet's own provider (EIP-6963), not window.ethereum,
+      // which another installed extension (e.g. Flow) may have taken over.
+      const provider = await connector.getProvider();
+      if (!provider) throw new Error("Could not reach your wallet provider.");
+
       const wallet7715 = createWalletClient({
         chain: APP_CHAIN,
-        transport: custom(window.ethereum as any)
+        transport: custom(provider as any)
       }).extend(erc7715ProviderActions());
 
       const estimatedFee = 50000n; // 0.05 USDC in 6 decimals
@@ -98,12 +106,18 @@ export function SubscriptionCheckoutButton({
   }
 
   return (
-    <Button 
-      onClick={handleSubscribe} 
+    <Button
+      onClick={handleSubscribe}
       disabled={loading || !isConnected}
       className="w-full sm:w-auto"
     >
-      {loading ? "Requesting Permissions..." : "Subscribe with Auto-Renew"}
+      {loading
+        ? "Requesting Permissions..."
+        : !isConnected
+          ? "Connect wallet to subscribe"
+          : wrongNetwork
+            ? `Switch to ${APP_CHAIN.name} & Subscribe`
+            : "Subscribe with Auto-Renew"}
     </Button>
   );
 }
