@@ -45,12 +45,31 @@ export async function POST(req: NextRequest) {
     const httpClient = new x402HTTPClient(coreClient);
     const fetchWithPayment = wrapFetchWithPayment(fetch, httpClient);
 
-    const res = await fetchWithPayment(`${BASE_URL}/api/x402/product/${productId}`);
-    const data = await res.json().catch(() => ({}));
+    let res: Response;
+    try {
+      res = await fetchWithPayment(`${BASE_URL}/api/x402/product/${productId}`);
+    } catch (payErr: any) {
+      // wrapFetchWithPayment throws if it can't build/redeem the delegation payment
+      // (bad permission context, scheme not registered, facilitator rejects the sign, ...).
+      console.error("orders/create: payment build/redeem threw:", payErr);
+      return NextResponse.json(
+        { error: "Payment could not be completed", message: payErr?.message || String(payErr) },
+        { status: 402 }
+      );
+    }
+
+    const data = await res.json().catch(() => ({} as any));
 
     if (!res.ok) {
+      // Surface the real settlement reason logged by the x402/product route
+      // (errorReason/errorMessage) instead of an opaque "Payment failed".
+      console.error("orders/create: x402 product returned", res.status, JSON.stringify(data));
       return NextResponse.json(
-        { error: data.error || "Payment failed" },
+        {
+          error: data.error || "Payment failed",
+          message: data.message,
+          upstreamStatus: res.status,
+        },
         { status: res.status || 402 }
       );
     }

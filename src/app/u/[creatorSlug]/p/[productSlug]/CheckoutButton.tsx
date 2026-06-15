@@ -91,7 +91,10 @@ export function CheckoutButton({
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Purchase failed");
+      if (!res.ok) {
+        const detail = [data.error, data.message].filter(Boolean).join(" — ");
+        throw new Error(detail || "Purchase failed");
+      }
 
       setResult(data);
     } catch (err: any) {
