@@ -13,6 +13,14 @@ const nextConfig: NextConfig = {
       '@safe-global/safe-apps-provider': false,
       '@walletconnect/ethereum-provider': false,
     };
+    
+    // Suppress warning: Critical dependency: the request of a dependency is an expression
+    // Caused by ox dependency in viem when bundled by Next.js
+    config.ignoreWarnings = [
+      ...(config.ignoreWarnings || []),
+      { module: /node_modules[\\/]ox[\\/]/ }
+    ];
+
     return config;
   },
 };
