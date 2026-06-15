@@ -1,72 +1,186 @@
-# MetaMask Smart Accounts & Delegation Template
+# 🛍️ CreatorPay – Decentralized Gumroad Alternative
 
-This is a NextJS MetaMask Smart Accounts & Delegation template created with [`@metamask/create-gator-app`](https://npmjs.com/package/@metamask/create-gator-app).
+**CreatorPay** is a decentralized platform where creators sell digital and AI-powered products, and buyers pay via MetaMask smart accounts using **x402**, **ERC-7710 delegations**, and **ERC-7715 Advanced Permissions**. 
 
-This template is meant to help you bootstrap your own projects with MetaMask Smart Accounts. It helps you build smart accounts with account abstraction, and powerful delegation features.
+By leveraging the **MetaMask Smart Accounts Kit**, **1Shot permissionless relayer**, and **Venice AI**, CreatorPay enables safe, gasless, and programmable micro-commerce between humans and agents.
 
-Learn more about [MetaMask Smart Accounts](https://docs.metamask.io/smart-accounts-kit/concepts/smart-accounts/).
+---
 
-## Prerequisites
+## 🚀 Hackathon Highlights & Track Focus
 
-1. **Pimlico API Key**: In this template, we use Pimlico's Bundler and Paymaster services to submit
-   user operations and sponsor transactions, respectively. You can retrieve the required API key from
-   the [Pimlico Dashboard](https://dashboard.pimlico.io/apikeys).
+This project was built to demonstrate real-world utility for **x402** and **Account Abstraction (ERC-7710/ERC-7715)**:
+- **x402 Micro-payments**: Implemented HTTP 402 payment flows for digital downloads and AI endpoints.
+- **ERC-7710 Delegations**: Seamless one-click purchasing via MetaMask smart accounts, routed through the MetaMask Facilitator.
+- **ERC-7715 Advanced Permissions**: True recurring subscriptions managed through granular, on-chain execution permissions (not centralized billing engines).
+- **1Shot Relayer**: Upgrading EOAs to smart accounts (EIP-7702) and relaying transaction bundles gas-free using stablecoins (USDC).
+- **Venice AI**: Providing privacy-preserving AI inference gated by machine-native x402 micro-payments.
 
-2. **Web3Auth Client ID**: During setup, if you used the `-add-web3auth` flag, you’ll need to create a new
-   project on the Web3Auth Dashboard and get your Client ID. You can follow
-   the [Web3Auth documentation](https://web3auth.io/docs/dashboard-setup#getting-started).
+---
 
-## Project structure
+## 📖 The Problem vs. The Solution
 
-```bash
-template/
-├── public/ # Static assets
-├── src/
-│ ├── app/ # App router pages
-│ ├── components/ # UI Components
-│ ├── hooks/ # Custom React hooks
-│ ├── providers/ # Custom React Context Provider
-│ └── utils/ # Utils for the starter
-├── .env # Environment variables
-├── .gitignore # Git ignore rules
-├── next.config.ts # Next.js configuration
-└── tsconfig.json # TypeScript configuration
+**The Problem:**
+Centralized creator platforms charge high fees, require credit cards, and hold custody of payouts. Furthermore, there is no standard way for AI agents to sell services to humans (or other agents) via machine-native, HTTP-based payments with programmable permissions.
+
+**The Solution:**
+CreatorPay lets creators and AI agents list digital downloads, services, and subscriptions priced in stablecoins (e.g., USDC). Buyers experience a seamless, one-click purchase flow using their MetaMask smart accounts. Subscription billing is handled transparently via ERC-7715 budgets, putting the user completely in control of their spending.
+
+---
+
+## 🛠️ Architecture & Tech Stack
+
+- **Frontend:** Next.js / React, Tailwind CSS
+- **Smart Accounts:** MetaMask Smart Accounts Kit (EIP-7702, ERC-7710, ERC-7715)
+- **Payments:** x402 HTTP flows & MetaMask Facilitator
+- **Relayer:** 1Shot API (Gas abstraction & 7702 upgrades)
+- **AI Engine:** Venice AI (Text completion & AI products)
+- **Backend & Storage:** Node/TypeScript API routes, Prisma, PostgreSQL, IPFS/S3
+
+### Detailed Core Flows
+
+#### 1. The 7702 Upgrade Flow (EOA to Smart Account)
+When a buyer connects with a standard EOA, CreatorPay seamlessly upgrades their account to a smart account using EIP-7702, enabling gasless transactions.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant MetaMask
+    participant 1Shot as 1Shot Relayer
+    
+    User->>Frontend: Connects EOA Wallet
+    Frontend->>MetaMask: Request Connect
+    MetaMask-->>Frontend: Returns EOA Address
+    Frontend->>User: "Upgrade to Smart Account" Prompt
+    User->>Frontend: Confirm Upgrade
+    Frontend->>1Shot: Trigger 7702 Upgrade
+    1Shot-->>Frontend: Returns Smart Account Address
+    Frontend->>Frontend: Update Local State to Smart Account
 ```
 
-## Setup Environment Variables
+#### 2. One-Time Digital Product Purchase (x402 + 7710)
+A straightforward x402 flow for purchasing digital downloads. Gas is paid in USDC via the 1Shot relayer.
 
-Update the following environment variables in the `.env` file at
-the root of your project.
-
-```
-NEXT_PUBLIC_PIMLICO_API_KEY =
-
-# Enter your Web3Auth Client ID if you
-# used the --add-web3auth flag.
-NEXT_PUBLIC_WEB3AUTH_CLIENT_ID =
-
-# The Web3Auth network is configured based
-# on the network option you selected during setup.
-NEXT_PUBLIC_WEB3AUTH_NETWORK =
-```
-
-## Getting started
-
-First, start the development server using the package manager you chose during setup:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
+```mermaid
+sequenceDiagram
+    participant Buyer
+    participant Frontend
+    participant Backend
+    participant MetaMask
+    participant Facilitator
+    participant 1Shot as 1Shot Relayer
+    
+    Buyer->>Frontend: Click "Buy" (e.g. 5 USDC)
+    Frontend->>Backend: GET /x402/product/{id}
+    Backend-->>Frontend: HTTP 402 Payment Required (amount, token, payTo)
+    Frontend->>MetaMask: Request ERC-7710 Delegation signature
+    MetaMask-->>Frontend: Returns Signed Delegation
+    Frontend->>1Shot: Relay Tx (pay gas in USDC)
+    1Shot->>Facilitator: Execute Delegation
+    Facilitator-->>Backend: Settle Payment
+    Frontend->>Backend: GET /x402/product/{id} + Payment Header
+    Backend-->>Frontend: HTTP 200 + Product Download URL
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser to view the app.
+#### 3. Recurring Subscriptions (ERC-7715)
+True decentralized subscriptions! The buyer grants an ERC-7715 budget once, and the backend draws from it securely during each billing cycle.
 
-## Learn more
+```mermaid
+sequenceDiagram
+    participant Buyer
+    participant Frontend
+    participant MetaMask
+    participant Backend as Backend (Cron)
+    participant Facilitator
+    participant 1Shot as 1Shot Relayer
+    
+    Buyer->>Frontend: Click "Subscribe"
+    Frontend->>MetaMask: Request ERC-7715 'erc20-token-periodic' Permission
+    MetaMask-->>Frontend: Returns Permission Context
+    Frontend->>Backend: Store Context (Subscribed!)
+    
+    note over Backend, 1Shot: Billing Cycle (e.g., Every 30 Days)
+    Backend->>Backend: Identify Due Subscriptions
+    Backend->>Backend: Create Derived x402 Delegation
+    Backend->>1Shot: Relay Tx (pay gas in USDC)
+    1Shot->>Facilitator: Execute Derived Delegation
+    Facilitator-->>Backend: Transfer Period Amount to Creator
+    Backend->>Backend: Update Next Billing Date & Log Payment
+```
 
-To learn more about MetaMask Smart Accounts, take a look at the following resources:
+#### 4. AI Product Invocation (Venice AI Micro-payments)
+For AI products, each prompt triggers an x402 micro-payment. The Venice API is securely called by the backend only after the transaction settles.
 
-- [MetaMask Smart Accounts Quickstart](https://docs.metamask.io/smart-accounts-kit/get-started/smart-account-quickstart/) - Get started quickly with the MetaMask Smart Accounts
-- [Delegation guide](https://docs.metamask.io/smart-accounts-kit/guides/delegation/execute-on-smart-accounts-behalf/) - Get started quickly with creating a MetaMask smart account and completing the delegation lifecycle (creating, signing, and redeeming a delegation).
+```mermaid
+sequenceDiagram
+    participant Buyer
+    participant Frontend
+    participant Backend
+    participant Venice as Venice AI
+    participant Facilitator
+    
+    Buyer->>Frontend: Send Chat Message
+    Frontend->>Backend: POST /x402/ai/{endpoint}
+    Backend-->>Frontend: HTTP 402 (e.g. 0.10 USDC per prompt)
+    Frontend->>Frontend: Sign Delegation & Relay (via 1Shot)
+    Frontend->>Backend: POST /x402/ai/{endpoint} + Payment Header
+    Facilitator-->>Backend: Validates Settlement
+    Backend->>Venice: Send Prompt (using ZDR/TEE)
+    Venice-->>Backend: Return AI Completion
+    Backend-->>Frontend: HTTP 200 + AI Output
+    Frontend->>Buyer: Display Response
+```
+
+---
+
+## 💻 Getting Started Locally
+
+### Prerequisites
+- Node.js (v18+)
+- `pnpm` (or npm/yarn)
+- PostgreSQL database
+- API Keys: 1Shot, Venice AI, Pimlico/Web3Auth (if applicable)
+
+### Setup Instructions
+
+1. **Clone & Install Dependencies**
+   ```bash
+   git clone https://github.com/your-username/creatorpay.git
+   cd creatorpay
+   pnpm install
+   ```
+
+2. **Environment Variables**
+   Copy `.env.example` to `.env` and fill in the required keys.
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Database Migration**
+   Apply the Prisma schema to your PostgreSQL database:
+   ```bash
+   npx prisma db push
+   # or npx prisma migrate dev
+   ```
+
+4. **Run the Development Server**
+   ```bash
+   pnpm run dev
+   ```
+   Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+---
+
+## 🌟 Demo Scenarios
+
+When reviewing the project, be sure to test the following flows:
+
+1. **Creator Onboarding:** Connect a wallet, create a profile, and list a digital product for USDC.
+2. **The 7702 Upgrade:** Connect as a buyer using a standard EOA and witness the seamless upgrade to a smart account via the 1Shot relayer.
+3. **The x402 Purchase:** Buy the digital product and watch the live activity feed display the on-chain settlement via ERC-7710.
+4. **The Subscription:** Subscribe to a creator's plan by approving an ERC-7715 Advanced Permission budget in MetaMask.
+5. **The AI Assistant:** Chat with a Venice-powered AI product, verifying the micro-payments settling for each prompt.
+
+---
+
+*Built with ❤️ for the Hackathon.*
