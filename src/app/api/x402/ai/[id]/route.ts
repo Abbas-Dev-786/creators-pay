@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { x402HTTPResourceServer, HTTPAdapter, HTTPRequestContext } from "@x402/core/server";
 import { X402_NETWORK } from "@/lib/config";
-import { getResourceServer } from "@/lib/x402/server";
+import { getResourceServer, paymentErrorReason } from "@/lib/x402/server";
 import { toX402Price } from "@/lib/money";
 
 class NextHTTPAdapter implements HTTPAdapter {
@@ -61,8 +61,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const processResult = await httpServer.processHTTPRequest(context);
 
     if (processResult.type === "payment-error") {
-      const { status, headers, body } = processResult.response;
-      return NextResponse.json(body || { error: "Payment required" }, { status, headers });
+      const { status, headers } = processResult.response;
+      // Real reason lives in the PAYMENT-REQUIRED header, not the `{}` body.
+      const reason = paymentErrorReason(processResult.response);
+      if (reason) console.error("x402 AI payment rejected:", reason);
+      return NextResponse.json(
+        { error: reason || "Payment required", message: reason },
+        { status, headers }
+      );
     }
 
     if (processResult.type === "no-payment-required") {

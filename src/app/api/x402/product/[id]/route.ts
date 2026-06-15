@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { x402HTTPResourceServer, HTTPAdapter, HTTPRequestContext } from "@x402/core/server";
 import { X402_NETWORK } from "@/lib/config";
-import { getResourceServer } from "@/lib/x402/server";
+import { getResourceServer, paymentErrorReason } from "@/lib/x402/server";
 import { createSignedDownloadUrl } from "@/lib/storage/supabase";
 import { toX402Price } from "@/lib/money";
 
@@ -58,7 +58,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     if (processResult.type === "payment-error") {
       const { status, headers, body } = processResult.response;
-      return NextResponse.json(body || { error: "Payment required" }, { status, headers });
+      // The verify-failure body defaults to `{}`; the real reason (bad/expired
+      // delegation, facilitator rejection, insufficient funds at verify time) is
+      // in the PAYMENT-REQUIRED header. Surface it instead of an opaque error.
+      const reason = paymentErrorReason(processResult.response);
+      if (reason) console.error("x402 product payment rejected:", reason);
+      return NextResponse.json(
+        { error: reason || "Payment required", message: reason },
+        { status, headers }
+      );
     }
 
     if (processResult.type === "no-payment-required") {

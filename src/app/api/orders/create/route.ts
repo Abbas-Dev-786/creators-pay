@@ -33,6 +33,43 @@ export async function POST(req: NextRequest) {
     }
     const sessionAccount = privateKeyToAccount(sessionKey as `0x${string}`);
 
+    // ---- TEMP DEBUG: inspect the granted delegation the facilitator simulates ----
+    try {
+      const { decodeAbiParameters } = await import("viem");
+      console.log("\n========== ORDER DEBUG ==========");
+      console.log("productId      :", productId);
+      console.log("grantedFrom    :", grantedFrom);
+      console.log("sessionAccount :", sessionAccount.address);
+      console.log("ctx typeof     :", typeof permissionContext, "len:", (permissionContext || "").length);
+      console.log("ctx prefix     :", String(permissionContext).slice(0, 12));
+      // ERC-7710 permissionContext = ABI-encoded Delegation[]
+      const DELEGATION = {
+        type: "tuple[]",
+        components: [
+          { name: "delegate", type: "address" },
+          { name: "delegator", type: "address" },
+          { name: "authority", type: "bytes32" },
+          { name: "caveats", type: "tuple[]", components: [
+            { name: "enforcer", type: "address" },
+            { name: "terms", type: "bytes" },
+            { name: "args", type: "bytes" },
+          ] },
+          { name: "salt", type: "uint256" },
+          { name: "signature", type: "bytes" },
+        ],
+      } as const;
+      const [delegations] = decodeAbiParameters([DELEGATION], permissionContext as `0x${string}`);
+      (delegations as any[]).forEach((d, i) => {
+        console.log(`-- delegation[${i}] delegator=${d.delegator} delegate=${d.delegate} caveats=${d.caveats.length}`);
+        d.caveats.forEach((c: any, j: number) =>
+          console.log(`     caveat[${j}] enforcer=${c.enforcer} terms=${c.terms}`));
+      });
+      console.log("=================================\n");
+    } catch (dbgErr: any) {
+      console.log("ORDER DEBUG decode failed:", dbgErr?.message, "| raw ctx:", String(permissionContext).slice(0, 80));
+    }
+    // ---- END TEMP DEBUG ----
+
     const erc7710Client = new x402Erc7710Client({
       delegationProvider: createx402DelegationProvider({
         account: sessionAccount,
