@@ -7,6 +7,7 @@ import { createWalletClient, custom } from "viem";
 import { erc7715ProviderActions } from "@metamask/smart-accounts-kit/actions";
 import { APP_CHAIN, USDC_ADDRESS } from "@/lib/config";
 import { wagmiConfig } from "@/providers/AppProvider";
+import { assertMetaMaskProvider } from "@/lib/wallet";
 import Button from "@/components/Button";
 
 export function CheckoutButton({
@@ -41,7 +42,7 @@ export function CheckoutButton({
       // Use the connected wallet's own provider (EIP-6963), not window.ethereum,
       // which another installed extension may have taken over.
       const provider = await connector.getProvider();
-      if (!provider) throw new Error("Could not reach your wallet provider.");
+      assertMetaMaskProvider(provider);
 
       const wallet7715 = createWalletClient({
         chain: APP_CHAIN,

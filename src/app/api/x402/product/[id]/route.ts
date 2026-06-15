@@ -71,8 +71,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const settleResult = await httpServer.processSettlement(paymentPayload, paymentRequirements, undefined, { request: context });
 
     if (!settleResult.success) {
-       const { status, headers, body } = settleResult.response;
-       return NextResponse.json(body || { error: "Settlement failed" }, { status, headers });
+       const { status, headers } = settleResult.response;
+       // The library defaults the 402 settlement-failure body to `{}`; surface the
+       // real on-chain reason (e.g. insufficient_funds) so the buyer sees why it failed.
+       console.error("x402 product settlement failed:", settleResult.errorReason, settleResult.errorMessage);
+       return NextResponse.json(
+         { error: settleResult.errorReason || "Settlement failed", message: settleResult.errorMessage },
+         { status, headers }
+       );
     }
 
     // Payment Successful!

@@ -9,9 +9,11 @@ import { wrapFetchWithPayment } from "@x402/fetch";
 import { verifyMessage } from "viem";
 
 const sessionAccount = privateKeyToAccount((process.env.SESSION_PRIVATE_KEY || "0x0000000000000000000000000000000000000000000000000000000000000001") as `0x${string}`);
-const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export async function POST(req: NextRequest) {
+  // Loop back to THIS server (handles dev ports like :3001) — fall back to the
+  // configured public URL only when an absolute origin isn't available.
+  const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
   try {
     const { sessionId, messages, buyerAddress, signature } = await req.json();
 
@@ -74,8 +76,10 @@ export async function POST(req: NextRequest) {
     try {
       const payRes = await fetchWithPayment(`${BASE_URL}/api/x402/ai/${sessionId}`);
       if (!payRes.ok) {
-        const txt = await payRes.text();
-        throw new Error(txt || "Micropayment failed");
+        // The x402/ai route returns { error, message } on settlement failure; parse it
+        // so the caller sees the real reason instead of an opaque "{}".
+        const errBody = await payRes.json().catch(() => ({} as any));
+        throw new Error(errBody.error || errBody.message || `settlement failed (HTTP ${payRes.status})`);
       }
       const payData = await payRes.json();
       txHash = payData.transaction;

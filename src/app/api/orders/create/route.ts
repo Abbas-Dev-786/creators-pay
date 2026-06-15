@@ -16,13 +16,10 @@ import { wrapFetchWithPayment } from "@x402/fetch";
  * x402 product resource route, which verifies/settles via the Facilitator and
  * returns the signed download URL.
  */
-const BASE_URL =
-  process.env.NEXT_PUBLIC_APP_URL ??
-  (process.env.NODE_ENV === "production"
-    ? (() => { throw new Error("NEXT_PUBLIC_APP_URL must be set in production"); })()
-    : "http://localhost:3000");
-
 export async function POST(req: NextRequest) {
+  // Loop back to THIS server (handles dev ports like :3001) — fall back to the
+  // configured public URL only when an absolute origin isn't available.
+  const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
   try {
     const { productId, permissionContext, grantedFrom } = await req.json();
 
