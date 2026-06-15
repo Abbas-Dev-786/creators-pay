@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
-import { HTTPFacilitatorClient, x402ResourceServer, x402HTTPResourceServer, HTTPAdapter, HTTPRequestContext } from "@x402/core/server";
-import { x402ExactEvmErc7710ServerScheme } from "@metamask/x402";
-import { FACILITATOR_URL, X402_NETWORK } from "@/lib/config";
+import { x402HTTPResourceServer, HTTPAdapter, HTTPRequestContext } from "@x402/core/server";
+import { X402_NETWORK } from "@/lib/config";
+import { getResourceServer } from "@/lib/x402/server";
 import { toX402Price } from "@/lib/money";
-
-const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
-const resourceServer = new x402ResourceServer(facilitatorClient).register(
-  X402_NETWORK,
-  new x402ExactEvmErc7710ServerScheme()
-);
 
 class NextHTTPAdapter implements HTTPAdapter {
   constructor(private req: NextRequest) {}
@@ -39,7 +33,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const payTo = subscription.plan.product.creator.payoutAddress || subscription.plan.product.creator.walletAddress;
 
-
+    const resourceServer = await getResourceServer();
     const httpServer = new x402HTTPResourceServer(resourceServer, {
       [`GET /api/x402/subscription/${subscriptionId}`]: {
         accepts: [{

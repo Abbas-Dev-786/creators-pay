@@ -22,19 +22,38 @@ uses the 1Shot relayer.** One rail, on Base Sepolia (84532).
 
 ## 2. The three payment flows (all → Facilitator)
 
-### Flow A — One-time digital purchase  (x402 + ERC-7710 delegation)
-The hero flow. Follows the **delegation-payments** + **seller-endpoint-setup** skills.
+### Flow A — One-time digital purchase  (ERC-7715 grant → backend redeems ERC-7710)
+The hero flow. Follows the **recurring-payments** + **seller-endpoint-setup** skills
+(same 7715 machinery as B/C, but redeemed once, synchronously).
+
+> **Why not direct browser ERC-7710?** MetaMask refuses to let a dApp sign an open
+> ERC-7710 root delegation for its own (internal) account — it throws *"External
+> signature requests cannot sign delegations for internal accounts."* The
+> `createx402DelegationProvider({ account: smartAccount })` / **delegation-payments**
+> flow only works for accounts you control via a **local private key** (backend /
+> agents). A browser MetaMask buyer must therefore go through ERC-7715, which still
+> redeems an ERC-7710 delegation under the hood — so the track fit is unchanged.
 
 - **Server** (`/api/x402/product/[id]`): protect with the official resource server.
   Build it from `x402HTTPResourceServer` + `x402ExactEvmErc7710ServerScheme`
   (both are installed/exported). It emits the real 402 `accepts[]` body and
-  verifies/settles the `PAYMENT-SIGNATURE` through the Facilitator. **Delete the
-  hand-rolled `Payment-Required` header + `payment-signature` parsing** — it cannot
-  round-trip with `wrapFetchWithPayment`.
-- **Client** (`CheckoutButton`): `toMetaMaskSmartAccount(Stateless7702)` →
-  `createx402DelegationProvider({ account })` → `x402Erc7710Client` →
-  `x402Client().register('eip155:*', client)` → `wrapFetchWithPayment` →
-  `fetchWithPayment('/api/x402/product/{id}')`. On 200, show download link.
+  verifies/settles the `PAYMENT-SIGNATURE` through the Facilitator. The shared
+  resource server (`src/lib/x402/server.ts`) MUST be `initialize()`-d once before
+  `processHTTPRequest()` or the facilitator-supported-kinds map is empty and it
+  throws *"Facilitator does not support exact on eip155:84532."*
+- **Grant (client, `CheckoutButton`)**: wallet extended with
+  `erc7715ProviderActions()`; `requestExecutionPermissions([{ type:
+  'erc20-token-periodic', data: { tokenAddress, periodAmount: <price + fee buffer,
+  bigint>, periodDuration, justification }, isAdjustmentAllowed: true }])`,
+  **`to` = backend SESSION ACCOUNT**, short expiry (one-time). POST `context` +
+  `grantedFrom` to `/api/orders/create`.
+- **Redeem (backend, `/api/orders/create`)**: session account buyer
+  `createx402DelegationProvider({ account: sessionAccount, parentPermissionContext:
+  context, from: grantedFrom })` → `x402Erc7710Client` →
+  `x402Client().register('eip155:*', client)` → `fetchWithPayment('/api/x402/
+  product/{id}')` (one shot). The product route settles via the Facilitator, writes
+  Order + PaymentEvent(`one_time`), and returns the short-TTL signed download URL,
+  which this route relays to the client. On 200, show download link.
 
 ### Flow B — Subscription / recurring  (ERC-7715 periodic budget)
 Follows the **recurring-payments** skill. Subscription = recurring; one mechanism.
@@ -114,8 +133,8 @@ granted budget. For the hackathon: a **single app-wide session key** in env
 ## 6. Demo script (what the video must show — this is the grading surface)
 
 1. Creator connects wallet, creates a digital product + a subscription + an AI product.
-2. Buyer one-time purchase → MetaMask delegation prompt → Facilitator settles →
-   download unlocks. **Show the tx.**
+2. Buyer one-time purchase → MetaMask ERC-7715 permission prompt → backend session
+   account redeems once → Facilitator settles → download unlocks. **Show the tx.**
 3. Buyer subscribes → MetaMask ERC-7715 periodic-permission prompt (human-readable
    budget) → approve. Trigger one billing cycle live → charge settles.
 4. Buyer opens AI chat → each message shows a micropayment settling before the reply.

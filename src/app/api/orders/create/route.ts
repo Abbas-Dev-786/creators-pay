@@ -1,0 +1,68 @@
+import { NextRequest, NextResponse } from "next/server";
+import { privateKeyToAccount } from "viem/accounts";
+import { createx402DelegationProvider } from "@metamask/smart-accounts-kit/experimental";
+import { x402Erc7710Client } from "@metamask/x402";
+import { x402Client, x402HTTPClient } from "@x402/core/client";
+import { wrapFetchWithPayment } from "@x402/fetch";
+
+/**
+ * One-time purchase settlement.
+ *
+ * The buyer cannot sign a raw ERC-7710 delegation from their MetaMask account
+ * (the extension blocks "external signature requests ... for internal accounts").
+ * Instead the buyer grants an ERC-7715 periodic permission to our backend session
+ * account, and here that session account redeems it ONCE — exactly the same buyer
+ * construction the billing cron uses for subscriptions — against the existing
+ * x402 product resource route, which verifies/settles via the Facilitator and
+ * returns the signed download URL.
+ */
+const BASE_URL =
+  process.env.NEXT_PUBLIC_APP_URL ??
+  (process.env.NODE_ENV === "production"
+    ? (() => { throw new Error("NEXT_PUBLIC_APP_URL must be set in production"); })()
+    : "http://localhost:3000");
+
+export async function POST(req: NextRequest) {
+  try {
+    const { productId, permissionContext, grantedFrom } = await req.json();
+
+    if (!productId || !permissionContext || !grantedFrom) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+
+    const sessionKey = process.env.SESSION_PRIVATE_KEY;
+    if (!sessionKey) {
+      return NextResponse.json({ error: "Server session account not configured" }, { status: 500 });
+    }
+    const sessionAccount = privateKeyToAccount(sessionKey as `0x${string}`);
+
+    const erc7710Client = new x402Erc7710Client({
+      delegationProvider: createx402DelegationProvider({
+        account: sessionAccount,
+        parentPermissionContext: permissionContext as `0x${string}`,
+        from: grantedFrom as `0x${string}`,
+      }),
+    });
+
+    const coreClient = new x402Client().register("eip155:*", erc7710Client);
+    const httpClient = new x402HTTPClient(coreClient);
+    const fetchWithPayment = wrapFetchWithPayment(fetch, httpClient);
+
+    const res = await fetchWithPayment(`${BASE_URL}/api/x402/product/${productId}`);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: data.error || "Payment failed" },
+        { status: res.status || 402 }
+      );
+    }
+
+    // The resource route already wrote the Order + PaymentEvent and minted the
+    // signed download URL — just relay its result to the buyer.
+    return NextResponse.json(data);
+  } catch (err: any) {
+    console.error("Order create error:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}

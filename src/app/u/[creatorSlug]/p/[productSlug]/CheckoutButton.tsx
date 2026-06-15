@@ -2,13 +2,10 @@
 
 import { useState } from "react";
 import { useAccount } from "wagmi";
-import { getWalletClient, getPublicClient, switchChain } from "wagmi/actions";
-import { createx402DelegationProvider } from "@metamask/smart-accounts-kit/experimental";
-import { x402Erc7710Client } from "@metamask/x402";
-import { x402Client, x402HTTPClient } from "@x402/core/client";
-import { wrapFetchWithPayment } from "@x402/fetch";
-import { Implementation, toMetaMaskSmartAccount } from "@metamask/smart-accounts-kit";
-import { APP_CHAIN } from "@/lib/config";
+import { switchChain } from "wagmi/actions";
+import { createWalletClient, custom } from "viem";
+import { erc7715ProviderActions } from "@metamask/smart-accounts-kit/actions";
+import { APP_CHAIN, USDC_ADDRESS } from "@/lib/config";
 import { wagmiConfig } from "@/providers/AppProvider";
 import Button from "@/components/Button";
 
@@ -23,7 +20,7 @@ export function CheckoutButton({
   type: string;
   creatorAddress: string;
 }) {
-  const { isConnected, chainId } = useAccount();
+  const { address, isConnected, chainId, connector } = useAccount();
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -31,55 +28,73 @@ export function CheckoutButton({
   const wrongNetwork = isConnected && chainId !== APP_CHAIN.id;
 
   async function handleBuy() {
-    if (!isConnected) return alert("Please connect your wallet first.");
+    if (!isConnected || !address || !connector) return alert("Please connect your wallet first.");
     setLoading(true);
     setResult(null);
 
     try {
-      // Make sure the wallet is on the right chain BEFORE we ask for a client.
-      // (A connected wallet on the wrong network is the usual cause of the
-      // misleading "connect wallet" error — useWalletClient returns undefined
-      // for an unconfigured chain even though the account is connected.)
+      // Ensure the wallet is on the right network before requesting permissions.
       if (chainId !== APP_CHAIN.id) {
         await switchChain(wagmiConfig, { chainId: APP_CHAIN.id });
       }
 
-      // Fetch fresh clients AFTER the switch so we never read a stale value.
-      const walletClient = await getWalletClient(wagmiConfig, { chainId: APP_CHAIN.id });
-      const publicClient = getPublicClient(wagmiConfig, { chainId: APP_CHAIN.id });
-      if (!walletClient || !publicClient) {
-        throw new Error("Could not reach your wallet. Make sure MetaMask is unlocked.");
-      }
+      // Use the connected wallet's own provider (EIP-6963), not window.ethereum,
+      // which another installed extension may have taken over.
+      const provider = await connector.getProvider();
+      if (!provider) throw new Error("Could not reach your wallet provider.");
 
-      // Initialize smart account
-      const smartAccount = await toMetaMaskSmartAccount({
-        client: publicClient,
-        implementation: Implementation.Stateless7702,
-        address: walletClient.account.address,
-        signer: walletClient as any,
-      });
+      const wallet7715 = createWalletClient({
+        chain: APP_CHAIN,
+        transport: custom(provider as any),
+      }).extend(erc7715ProviderActions());
 
-      // Setup x402 fetch client
-      const erc7710Client = new x402Erc7710Client({
-        delegationProvider: createx402DelegationProvider({
-          account: smartAccount as any,
+      // MetaMask refuses to sign a raw ERC-7710 delegation for its own account
+      // ("External signature requests cannot sign delegations for internal
+      // accounts"). So instead of building a delegation client in the browser, we
+      // request a scoped ERC-7715 permission for exactly this purchase (+ a small
+      // buffer for the facilitator's gas fee, also pulled from the budget) granted
+      // to our backend session account, which redeems it once via the Facilitator.
+      const estimatedFee = 50000n; // 0.05 USDC in 6 decimals
+      const totalAmount = BigInt(priceAmount) + estimatedFee;
+
+      const granted = await wallet7715.requestExecutionPermissions([{
+        chainId: APP_CHAIN.id,
+        to: process.env.NEXT_PUBLIC_SESSION_ACCOUNT as `0x${string}`,
+        permission: {
+          type: "erc20-token-periodic",
+          data: {
+            tokenAddress: USDC_ADDRESS,
+            periodAmount: totalAmount,
+            periodDuration: 86400,
+            justification: "One-time purchase on CreatorPay",
+          },
+          isAdjustmentAllowed: true,
+        },
+        expiry: Math.floor(Date.now() / 1000) + 3600, // 1 hour to complete the purchase
+      }]);
+
+      const context = granted[0]?.context;
+      if (!context) throw new Error("No permission context returned by wallet");
+
+      // Hand the granted permission to the backend, which settles the purchase as
+      // the session account and returns the signed download URL.
+      const res = await fetch("/api/orders/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productId,
+          buyerAddress: address,
+          permissionContext: context,
+          grantedFrom: granted[0].from,
         }),
       });
 
-      const coreClient = new x402Client().register("eip155:*", erc7710Client);
-      const httpClient = new x402HTTPClient(coreClient);
-      const fetchWithPayment = wrapFetchWithPayment(fetch, httpClient);
-
-      // Trigger the purchase flow
-      const res = await fetchWithPayment(`/api/x402/product/${productId}`);
-      
-      if (!res.ok) {
-        throw new Error(await res.text());
-      }
-      
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Purchase failed");
+
       setResult(data);
     } catch (err: any) {
+      console.log(err);
       alert("Purchase failed: " + err.message);
     } finally {
       setLoading(false);
